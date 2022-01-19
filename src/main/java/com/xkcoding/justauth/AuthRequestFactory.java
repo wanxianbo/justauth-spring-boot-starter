@@ -1,26 +1,5 @@
-/*
- * Copyright (c) 2019-2029, xkcoding & Yangkai.Shen & 沈扬凯 (237497819@qq.com & xkcoding.com).
- * <p>
- * Licensed under the GNU LESSER GENERAL PUBLIC LICENSE 3.0;
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.gnu.org/licenses/lgpl.html
- * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
 package com.xkcoding.justauth;
 
-import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.util.EnumUtil;
-import cn.hutool.core.util.ReflectUtil;
-import cn.hutool.core.util.StrUtil;
 import com.xkcoding.http.config.HttpConfig;
 import com.xkcoding.justauth.autoconfigure.ExtendProperties;
 import com.xkcoding.justauth.autoconfigure.JustAuthProperties;
@@ -33,11 +12,14 @@ import me.zhyd.oauth.config.AuthSource;
 import me.zhyd.oauth.enums.AuthResponseStatus;
 import me.zhyd.oauth.exception.AuthException;
 import me.zhyd.oauth.request.*;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.ReflectionUtils;
 
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,7 +53,7 @@ public class AuthRequestFactory {
         ExtendProperties extend = properties.getExtend();
         if (null != extend) {
             Class enumClass = extend.getEnumClass();
-            List<String> names = EnumUtil.getNames(enumClass);
+            List<String> names = getEnumNames(enumClass);
             // 扩展列表
             extendList = extend.getConfig()
                 .keySet()
@@ -82,7 +64,8 @@ public class AuthRequestFactory {
         }
 
         // 合并
-        return (List<String>) CollUtil.addAll(defaultList, extendList);
+        defaultList.addAll(extendList);
+        return defaultList;
     }
 
     /**
@@ -92,7 +75,7 @@ public class AuthRequestFactory {
      * @return {@link AuthRequest}
      */
     public AuthRequest get(String source) {
-        if (StrUtil.isBlank(source)) {
+        if (StringUtils.isBlank(source)) {
             throw new AuthException(AuthResponseStatus.NO_AUTH_SOURCE);
         }
 
@@ -122,7 +105,8 @@ public class AuthRequestFactory {
     private AuthRequest getExtendRequest(Class clazz, String source) {
         String upperSource = source.toUpperCase();
         try {
-            EnumUtil.fromString(clazz, upperSource);
+            // 获取要返回其常量的枚举类型
+            Enum.valueOf(clazz, upperSource);
         } catch (IllegalArgumentException e) {
             // 无自定义匹配
             return null;
@@ -144,7 +128,15 @@ public class AuthRequestFactory {
 
             if (requestClass != null) {
                 // 反射获取 Request 对象，所以必须实现 2 个参数的构造方法
-                return ReflectUtil.newInstance(requestClass, (AuthConfig) extendRequestConfig, authStateCache);
+                AuthRequest authRequest = null;
+                try {
+                    authRequest = ReflectionUtils.accessibleConstructor(requestClass, AuthConfig.class, AuthStateCache.class)
+                            .newInstance(extendRequestConfig, authStateCache);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+
+                return authRequest;
             }
         }
 
@@ -162,7 +154,7 @@ public class AuthRequestFactory {
         AuthDefaultSource authDefaultSource;
 
         try {
-            authDefaultSource = EnumUtil.fromString(AuthDefaultSource.class, source.toUpperCase());
+            authDefaultSource = Enum.valueOf(AuthDefaultSource.class, source.toUpperCase());
         } catch (IllegalArgumentException e) {
             // 无自定义匹配
             return null;
@@ -290,4 +282,23 @@ public class AuthRequestFactory {
             .proxy(new Proxy(Proxy.Type.valueOf(proxyConfig.getType()), new InetSocketAddress(proxyConfig.getHostname(), proxyConfig.getPort())))
             .build());
     }
+
+    /**
+     * 枚举类中所有枚举对象的name列表
+     *
+     * @param clazz 枚举类
+     * @return name列表
+     */
+    private static List<String> getEnumNames(Class<? extends Enum<?>> clazz) {
+        final Enum<?>[] enums = clazz.getEnumConstants();
+        if (null == enums) {
+            return Collections.emptyList();
+        }
+        final List<String> list = new ArrayList<>(enums.length);
+        for (Enum<?> e : enums) {
+            list.add(e.name());
+        }
+        return list;
+    }
+
 }
